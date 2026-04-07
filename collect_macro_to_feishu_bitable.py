@@ -336,14 +336,18 @@ def append_record_to_bitable(snapshot: dict):
 
     payload = {
         "fields": {
-            "日期": snapshot.get("日期", "null"),
-            "10年期美债收益率": snapshot.get("10年期美债收益率", "null"),
-            "美元指数": snapshot.get("美元指数", "null"),
-            "布伦特原油": snapshot.get("布伦特原油", "null"),
-            "中国社融增量_亿元": snapshot.get("中国社融增量_亿元", "null"),
-            "沪深300市盈率": snapshot.get("沪深300市盈率", "null"),
-        }
-    }
+    "日期": snapshot.get("日期", "null"),
+    "美联储基准利率": snapshot.get("美联储基准利率", "null"),
+    "美国2年期收益率": snapshot.get("美国2年期收益率", "null"),
+    "美国10年期收益率": snapshot.get("美国10年期收益率", "null"),
+    "美元指数DXY": snapshot.get("美元指数DXY", "null"),
+    "WTI原油": snapshot.get("WTI原油", "null"),
+    "铜价": snapshot.get("铜价", "null"),
+    "USD/CNH": snapshot.get("USD/CNH", "null"),
+    "VIX": snapshot.get("VIX", "null"),
+    "中国社融增量_亿元": snapshot.get("中国社融增量_亿元", "null"),
+    "沪深300市盈率": snapshot.get("沪深300市盈率", "null"),
+}
 
     resp = requests.post(url, headers=headers, json=payload, timeout=30)
     data = resp.json()
