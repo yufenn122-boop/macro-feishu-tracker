@@ -245,15 +245,15 @@ def build_snapshot():
     snapshot = {
     "日期": datetime.now().strftime("%Y-%m-%d"),
     "美联储基准利率": "null",
-    "美国2年期收益率": "null",
-    "美国10年期收益率": "null",
-    "美元指数DXY": "null",
-    "WTI原油": "null",
-    "铜价": "null",
-    "USD/CNH": "null",
-    "VIX": "null",
-    "中国社融增量_亿元": "null",
-    "沪深300市盈率": "null",
+    "美国2年期收益率": "None",
+    "美国10年期收益率": "None",
+    "美元指数DXY": "None",
+    "WTI原油": "None",
+    "铜价": "None",
+    "USD/CNH": "None",
+    "VIX": "None",
+    "中国社融增量_亿元": "None",
+    "沪深300市盈率": "None",
     }
 
     try:
@@ -268,7 +268,7 @@ def build_snapshot():
     try:
         log("开始抓取：美国2年期收益率")
         data = fetch_us2y_fred()
-        snapshot["美国2年期收益率"] = data.get("美国2年期收益率", "null")
+        snapshot["美国2年期收益率"] = data.get("美国2年期收益率", "None")
         log("抓取成功：美国2年期收益率")
     except Exception as e:
         log(f"抓取失败：美国2年期收益率 | {e}")
@@ -277,7 +277,7 @@ def build_snapshot():
     try:
         log("开始抓取：美债")
         data = fetch_us10y_fred()
-        snapshot["美国10年期收益率"] = data.get("10年期美债收益率", "null")
+        snapshot["美国10年期收益率"] = data.get("10年期美债收益率", "None")
         log("抓取成功：美债")
     except Exception as e:
         log(f"抓取失败：美债 | {e}")
@@ -286,7 +286,7 @@ def build_snapshot():
     try:
         log("开始抓取：美元指数")
         data = fetch_yahoo_last_close("DX-Y.NYB", "美元指数DXY", "美元指数日期")
-        snapshot["美元指数DXY"] = data.get("美元指数DXY", "null")
+        snapshot["美元指数DXY"] = data.get("美元指数DXY", "None")
         log("抓取成功：美元指数")
     except Exception as e:
         log(f"抓取失败：美元指数 | {e}")
@@ -295,7 +295,7 @@ def build_snapshot():
     try:
         log("开始抓取：布伦特原油")
         data = fetch_yahoo_last_close("BZ=F", "布伦特原油", "布伦特原油日期")
-        snapshot["WTI原油"] = data.get("布伦特原油", "null")
+        snapshot["WTI原油"] = data.get("布伦特原油", "None")
         log("抓取成功：布伦特原油")
     except Exception as e:
         log(f"抓取失败：布伦特原油 | {e}")
@@ -304,7 +304,7 @@ def build_snapshot():
     try:
         log("开始抓取：中国社融")
         data = fetch_china_social_financing()
-        snapshot["中国社融增量_亿元"] = data.get("中国社融增量_亿元", "null")
+        snapshot["中国社融增量_亿元"] = data.get("中国社融增量_亿元", "None")
         log("抓取成功：中国社融")
     except Exception as e:
         log(f"抓取失败：中国社融 | {e}")
@@ -313,7 +313,7 @@ def build_snapshot():
     try:
         log("开始抓取：沪深300市盈率")
         data = fetch_hs300_pe()
-        snapshot["沪深300市盈率"] = data.get("沪深300市盈率", "null")
+        snapshot["沪深300市盈率"] = data.get("沪深300市盈率", "None")
         log("抓取成功：沪深300市盈率")
     except Exception as e:
         log(f"抓取失败：沪深300市盈率 | {e}")
@@ -336,17 +336,17 @@ def append_record_to_bitable(snapshot: dict):
 
     payload = {
         "fields": {
-            "日期": snapshot.get("日期", "null"),
+            "日期": snapshot.get("日期", "None"),
             "美联储基准利率": snapshot.get("美联储基准利率", "null"),
-            "美国2年期收益率": snapshot.get("美国2年期收益率", "null"),
-            "美国10年期收益率": snapshot.get("美国10年期收益率", "null"),
-            "美元指数DXY": snapshot.get("美元指数DXY", "null"),
-            "WTI原油": snapshot.get("WTI原油", "null"),
-            "铜价": snapshot.get("铜价", "null"),
-            "USD/CNH": snapshot.get("USD/CNH", "null"),
-            "VIX": snapshot.get("VIX", "null"),
-            "中国社融增量_亿元": snapshot.get("中国社融增量_亿元", "null"),
-            "沪深300市盈率": snapshot.get("沪深300市盈率", "null"),
+            "美国2年期收益率": snapshot.get("美国2年期收益率", "None"),
+            "美国10年期收益率": snapshot.get("美国10年期收益率", "None"),
+            "美元指数DXY": snapshot.get("美元指数DXY", "None"),
+            "WTI原油": snapshot.get("WTI原油", "None"),
+            "铜价": snapshot.get("铜价", "None"),
+            "USD/CNH": snapshot.get("USD/CNH", "None"),
+            "VIX": snapshot.get("VIX", "None"),
+            "中国社融增量_亿元": snapshot.get("中国社融增量_亿元", "None"),
+            "沪深300市盈率": snapshot.get("沪深300市盈率", "None"),
         }
     }
 
