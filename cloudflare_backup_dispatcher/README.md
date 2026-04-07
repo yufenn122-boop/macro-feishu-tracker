@@ -13,11 +13,12 @@ What it does:
 
 GitHub Actions scheduled workflows can be delayed or dropped under load. This Worker gives you an external timer without needing your own computer to stay online.
 
-Current production setup target:
+Current production setup:
 
 - Cloudflare Worker cron is the only scheduler.
 - GitHub workflow keeps `workflow_dispatch` only.
 - Daily trigger time is `UTC 01:05` (`09:05` China time).
+- Production Worker URL: `https://macro-feishu-backup-dispatcher.yufennbrief2026.workers.dev`
 
 ## Files
 
@@ -51,6 +52,20 @@ wrangler deploy
 
 ## Test commands
 
+Health check:
+
 ```bash
-curl -X POST https://<your-worker-subdomain>.workers.dev/run
+curl https://macro-feishu-backup-dispatcher.yufennbrief2026.workers.dev/health
 ```
+
+Manual run check:
+
+```bash
+curl -X POST https://macro-feishu-backup-dispatcher.yufennbrief2026.workers.dev/run
+```
+
+## Important note about duplicates
+
+The repository is already set up so Cloudflare is the only timer and GitHub only executes manual dispatches from the Worker.
+
+If you ever add a GitHub `schedule:` block back into `daily_macro_feishu.yml`, duplicate or delayed runs can return.
