@@ -2,8 +2,6 @@ name: 每日宏观数据采集到飞书多维表格
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "5 1 * * *"
 
 jobs:
   run-daily-macro:

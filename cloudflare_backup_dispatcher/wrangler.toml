@@ -1,0 +1,14 @@
+name = "macro-feishu-backup-dispatcher"
+main = "src/index.js"
+compatibility_date = "2026-04-07"
+
+[triggers]
+crons = ["5 1 * * *"]
+
+[vars]
+GITHUB_OWNER = "yufenn122-boop"
+GITHUB_REPO = "macro-feishu-tracker"
+GITHUB_WORKFLOW_FILE = "daily_macro_feishu.yml"
+GITHUB_REF = "main"
+LOCAL_TIMEZONE = "Asia/Shanghai"
+GITHUB_API_VERSION = "2022-11-28"
