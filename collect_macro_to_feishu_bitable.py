@@ -334,7 +334,7 @@ def append_record_to_bitable(snapshot: dict):
         "Content-Type": "application/json",
     }
 
-        payload = {
+    payload = {
         "fields": {
             "日期": snapshot.get("日期", "null"),
             "美联储基准利率": snapshot.get("美联储基准利率", "null"),
