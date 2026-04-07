@@ -334,20 +334,30 @@ def append_record_to_bitable(snapshot: dict):
         "Content-Type": "application/json",
     }
 
+    fields = {
+        "日期": snapshot.get("日期", ""),
+        "美联储基准利率": snapshot.get("美联储基准利率", ""),
+    }
+
+    optional_number_fields = [
+        "美国2年期收益率",
+        "美国10年期收益率",
+        "美元指数DXY",
+        "WTI原油",
+        "铜价",
+        "USD/CNH",
+        "VIX",
+        "中国社融增量_亿元",
+        "沪深300市盈率",
+    ]
+
+    for field_name in optional_number_fields:
+        value = snapshot.get(field_name, None)
+        if value is not None:
+            fields[field_name] = value
+
     payload = {
-        "fields": {
-            "日期": snapshot.get("日期", "null"),
-            "美联储基准利率": snapshot.get("美联储基准利率", "null"),
-            "美国2年期收益率": snapshot.get("美国2年期收益率", None),
-            "美国10年期收益率": snapshot.get("美国10年期收益率", None),
-            "美元指数DXY": snapshot.get("美元指数DXY", None),
-            "WTI原油": snapshot.get("WTI原油", None),
-            "铜价": snapshot.get("铜价", None),
-            "USD/CNH": snapshot.get("USD/CNH", None),
-            "VIX": snapshot.get("VIX", None),
-            "中国社融增量_亿元": snapshot.get("中国社融增量_亿元", None),
-            "沪深300市盈率": snapshot.get("沪深300市盈率", None),
-        }
+        "fields": fields
     }
 
     resp = requests.post(url, headers=headers, json=payload, timeout=30)
