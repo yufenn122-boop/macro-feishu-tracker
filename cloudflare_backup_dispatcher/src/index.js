@@ -9,29 +9,47 @@ const ACTIVE_RUN_STATUSES = new Set([
 
 export default {
   async scheduled(_controller, env, ctx) {
-    ctx.waitUntil(runBackupDispatch(env, "scheduled"));
+    ctx.waitUntil(
+      runBackupDispatch(env, "scheduled").catch((error) => {
+        console.error("Scheduled dispatch failed:", error);
+      }),
+    );
   },
 
   async fetch(request, env) {
-    const url = new URL(request.url);
+    try {
+      const url = new URL(request.url);
 
-    if (url.pathname === "/health") {
+      if (url.pathname === "/health") {
+        const publicConfig = getPublicConfig(env);
+        return jsonResponse({
+          ok: true,
+          service: "macro-feishu-backup-dispatcher",
+          timezone: publicConfig.timezone,
+          repo: publicConfig.repo,
+          workflow: publicConfig.workflowFile,
+        });
+      }
+
+      if (url.pathname === "/run" && request.method === "POST") {
+        const result = await runBackupDispatch(env, "manual");
+        return jsonResponse(result, result.ok ? 200 : 500);
+      }
+
       return jsonResponse({
         ok: true,
-        service: "macro-feishu-backup-dispatcher",
-        timezone: getConfig(env).timezone,
+        message: "Use POST /run to test the dispatcher or GET /health for status.",
       });
+    } catch (error) {
+      console.error("Fetch handler failed:", error);
+      return jsonResponse(
+        {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        500,
+      );
     }
-
-    if (url.pathname === "/run" && request.method === "POST") {
-      const result = await runBackupDispatch(env, "manual");
-      return jsonResponse(result, result.ok ? 200 : 500);
-    }
-
-    return jsonResponse({
-      ok: true,
-      message: "Use POST /run to test the dispatcher or GET /health for status.",
-    });
   },
 };
 
@@ -78,7 +96,6 @@ async function runBackupDispatch(env, triggerSource) {
 
 function getConfig(env) {
   const config = {
-    githubToken: env.GITHUB_TOKEN,
     owner: env.GITHUB_OWNER,
     repo: env.GITHUB_REPO,
     workflowFile: env.GITHUB_WORKFLOW_FILE || "daily_macro_feishu.yml",
@@ -93,7 +110,22 @@ function getConfig(env) {
     }
   }
 
-  return config;
+  if (!env.GITHUB_TOKEN) {
+    throw new Error("Missing required configuration: githubToken");
+  }
+
+  return {
+    ...config,
+    githubToken: env.GITHUB_TOKEN,
+  };
+}
+
+function getPublicConfig(env) {
+  return {
+    repo: env.GITHUB_REPO || "macro-feishu-tracker",
+    workflowFile: env.GITHUB_WORKFLOW_FILE || "daily_macro_feishu.yml",
+    timezone: env.LOCAL_TIMEZONE || "Asia/Shanghai",
+  };
 }
 
 async function listWorkflowRuns(config) {
