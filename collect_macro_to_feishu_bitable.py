@@ -215,48 +215,37 @@ def get_tenant_access_token():
 # 数据抓取：官方/FRED
 # =========================
 def fetch_fed_rate_target():
-    # 用 akshare 获取美联储利率决议数据
     df = ak.macro_bank_usa_interest_rate()
     if df is None or df.empty:
         raise ValueError("美联储利率数据为空")
     df.columns = [str(c).strip() for c in df.columns]
-    # 取最后一行的今期值
-    rate_col = None
-    for c in df.columns:
-        if "今" in c or "现" in c or "rate" in c.lower() or "利率" in c:
-            rate_col = c
-            break
-    if rate_col is None:
-        rate_col = df.columns[-1]
     last = df.iloc[-1]
-    val = safe_float(last[rate_col])
+    # 今值为空时用前值（非决议日今值是 NaN）
+    val = safe_float(last.get("今值")) or safe_float(last.get("前值"))
     if val is None:
-        raise ValueError(f"美联储利率字段为空，列名：{list(df.columns)}")
+        raise ValueError(f"美联储利率今值和前值均为空，列：{list(df.columns)}")
     return {"美联储基准利率": f"{val:.2f}"}
 
 
 def fetch_us2y_fred():
-    # 财政部 XML：先查本月，若为空则查上月
-    for delta in [0, -1]:
-        dt = datetime.now()
-        if delta == -1:
-            if dt.month == 1:
-                dt = dt.replace(year=dt.year - 1, month=12)
-            else:
-                dt = dt.replace(month=dt.month - 1)
-        month = dt.strftime("%Y%m")
-        url = f"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value={month}"
-        resp = requests.get(url, headers=REQUEST_HEADERS, timeout=TIMEOUT)
-        resp.raise_for_status()
-        root = ET.fromstring(resp.text)
-        ns = {"d": "http://schemas.microsoft.com/ado/2007/08/dataservices"}
-        entries = root.findall(".//{http://www.w3.org/2005/Atom}entry")
-        if not entries:
-            continue
-        val = entries[-1].find(".//d:BC_2YEAR", ns)
-        if val is not None and val.text:
-            return {"美国2年期收益率": float(val.text)}
-    raise ValueError("Treasury 2Y 数据为空")
+    # akshare 美国2年期国债收益率，比 Treasury XML 更稳定
+    df = ak.bond_zh_us_rate(start_date="20250101")
+    if df is None or df.empty:
+        raise ValueError("美国国债收益率数据为空")
+    df.columns = [str(c).strip() for c in df.columns]
+    # 找2年期列
+    col_2y = None
+    for c in df.columns:
+        if "2" in c and ("年" in c or "year" in c.lower() or "Y" in c):
+            col_2y = c
+            break
+    if col_2y is None:
+        raise ValueError(f"未找到2年期列，列名：{list(df.columns)}")
+    df[col_2y] = pd.to_numeric(df[col_2y], errors="coerce")
+    df = df.dropna(subset=[col_2y])
+    if df.empty:
+        raise ValueError("2年期收益率有效数据为空")
+    return {"美国2年期收益率": safe_float(df.iloc[-1][col_2y])}
 
 
 def fetch_us10y_fred():
@@ -265,7 +254,26 @@ def fetch_us10y_fred():
 
 
 def fetch_wti_eia():
-    value, _ = fetch_yfinance_last_close("CL=F")
+    # 主源：akshare 原油现货价格
+    try:
+        df = ak.macro_energy_oil_hist(symbol="WTI")
+        if df is not None and not df.empty:
+            df.columns = [str(c).strip() for c in df.columns]
+            price_col = None
+            for c in df.columns:
+                if "收盘" in c or "close" in c.lower() or "价格" in c or "price" in c.lower():
+                    price_col = c
+                    break
+            if price_col is None:
+                price_col = df.columns[-1]
+            df[price_col] = pd.to_numeric(df[price_col], errors="coerce")
+            df = df.dropna(subset=[price_col])
+            if not df.empty:
+                return {"WTI原油": safe_float(df.iloc[-1][price_col])}
+    except Exception:
+        pass
+    # 备源：yfinance BZ=F（布伦特，与WTI价差约2-3美元）
+    value, _ = fetch_yfinance_last_close("BZ=F")
     return {"WTI原油": value}
 
 
