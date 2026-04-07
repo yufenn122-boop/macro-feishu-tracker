@@ -295,7 +295,7 @@ def build_snapshot():
     try:
         log("开始抓取：布伦特原油")
         data = fetch_yahoo_last_close("BZ=F", "布伦特原油", "布伦特原油日期")
-        snapshot["布伦特原油"] = data.get("布伦特原油", "null")
+        snapshot["WTI原油"] = data.get("布伦特原油", "null")
         log("抓取成功：布伦特原油")
     except Exception as e:
         log(f"抓取失败：布伦特原油 | {e}")
