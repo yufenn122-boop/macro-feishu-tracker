@@ -7,8 +7,10 @@ import requests
 import yfinance as yf
 import akshare as ak
 
-
 FRED_DGS10_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10"
+FRED_DGS2_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS2"
+FRED_FEDFUNDS_TARGET_UPPER_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARU"
+FRED_FEDFUNDS_TARGET_LOWER_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARL"
 
 HS300_PE_CANDIDATE_COLUMNS = [
     "滚动市盈率",
@@ -96,6 +98,72 @@ def fetch_us10y_fred():
         "10年期美债日期": normalize_date(last_row[date_col]),
     }
 
+def fetch_us2y_fred():
+    resp = requests.get(FRED_DGS2_CSV, timeout=30)
+    resp.raise_for_status()
+
+    df = pd.read_csv(pd.io.common.StringIO(resp.text))
+    df.columns = [str(c).strip() for c in df.columns]
+
+    date_col = None
+    value_col = None
+
+    for c in df.columns:
+        col = str(c).strip().lower()
+        if col in ["date", "observation_date"]:
+            date_col = c
+        if str(c).strip().upper() == "DGS2":
+            value_col = c
+
+    if date_col is None or value_col is None:
+        raise ValueError(f"美国2年期收益率字段异常：{list(df.columns)}")
+
+    df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
+    df = df.dropna(subset=[value_col])
+
+    if df.empty:
+        raise ValueError("美国2年期收益率数据为空")
+
+    last_row = df.iloc[-1]
+    return {
+        "美国2年期收益率": safe_float(last_row[value_col]),
+    }
+
+def fetch_fed_rate_target():
+    def _read_target_csv(url, value_name):
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+
+        df = pd.read_csv(pd.io.common.StringIO(resp.text))
+        df.columns = [str(c).strip() for c in df.columns]
+
+        date_col = None
+        value_col = None
+
+        for c in df.columns:
+            col = str(c).strip().lower()
+            if col in ["date", "observation_date"]:
+                date_col = c
+            if str(c).strip().upper() == value_name.upper():
+                value_col = c
+
+        if date_col is None or value_col is None:
+            raise ValueError(f"美联储基准利率字段异常：{list(df.columns)}")
+
+        df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
+        df = df.dropna(subset=[value_col])
+
+        if df.empty:
+            raise ValueError("美联储基准利率数据为空")
+
+        return df.iloc[-1][value_col]
+
+    lower = _read_target_csv(FRED_FEDFUNDS_TARGET_LOWER_CSV, "DFEDTARL")
+    upper = _read_target_csv(FRED_FEDFUNDS_TARGET_UPPER_CSV, "DFEDTARU")
+
+    return {
+        "美联储基准利率": f"{safe_float(lower):.2f}-{safe_float(upper):.2f}"
+    }
 
 def fetch_yahoo_last_close(symbol: str, value_col_name: str, date_col_name: str):
     ticker = yf.Ticker(symbol)
@@ -175,18 +243,41 @@ def fetch_hs300_pe():
 
 def build_snapshot():
     snapshot = {
-        "日期": datetime.now().strftime("%Y-%m-%d"),
-        "10年期美债收益率": "null",
-        "美元指数": "null",
-        "布伦特原油": "null",
-        "中国社融增量_亿元": "null",
-        "沪深300市盈率": "null",
+    "日期": datetime.now().strftime("%Y-%m-%d"),
+    "美联储基准利率": "null",
+    "美国2年期收益率": "null",
+    "美国10年期收益率": "null",
+    "美元指数DXY": "null",
+    "WTI原油": "null",
+    "铜价": "null",
+    "USD/CNH": "null",
+    "VIX": "null",
+    "中国社融增量_亿元": "null",
+    "沪深300市盈率": "null",
     }
 
     try:
+        log("开始抓取：美联储基准利率")
+        data = fetch_fed_rate_target()
+        snapshot["美联储基准利率"] = data.get("美联储基准利率", "null")
+        log("抓取成功：美联储基准利率")
+    except Exception as e:
+        log(f"抓取失败：美联储基准利率 | {e}")
+        log(traceback.format_exc())
+
+    try:
+        log("开始抓取：美国2年期收益率")
+        data = fetch_us2y_fred()
+        snapshot["美国2年期收益率"] = data.get("美国2年期收益率", "null")
+        log("抓取成功：美国2年期收益率")
+    except Exception as e:
+        log(f"抓取失败：美国2年期收益率 | {e}")
+        log(traceback.format_exc())
+    
+    try:
         log("开始抓取：美债")
         data = fetch_us10y_fred()
-        snapshot["10年期美债收益率"] = data.get("10年期美债收益率", "null")
+        snapshot["美国10年期收益率"] = data.get("10年期美债收益率", "null")
         log("抓取成功：美债")
     except Exception as e:
         log(f"抓取失败：美债 | {e}")
@@ -194,8 +285,8 @@ def build_snapshot():
 
     try:
         log("开始抓取：美元指数")
-        data = fetch_yahoo_last_close("DX-Y.NYB", "美元指数", "美元指数日期")
-        snapshot["美元指数"] = data.get("美元指数", "null")
+        data = fetch_yahoo_last_close("DX-Y.NYB", "美元指数DXY", "美元指数日期")
+        snapshot["美元指数DXY"] = data.get("美元指数DXY", "null")
         log("抓取成功：美元指数")
     except Exception as e:
         log(f"抓取失败：美元指数 | {e}")
