@@ -3,6 +3,7 @@ import re
 import json
 import math
 import traceback
+import xml.etree.ElementTree as ET
 from datetime import datetime
 
 import pandas as pd
@@ -214,23 +215,35 @@ def get_tenant_access_token():
 # 数据抓取：官方/FRED
 # =========================
 def fetch_fed_rate_target():
-    # 美联储目标利率无直接 yfinance ticker，用 FRED API key 方式或保留 FRED
-    # 但 GitHub Actions 封锁 FRED，改为抓 yfinance ^IRX 近似短端利率
-    # 实际联邦基金目标利率改为从 Treasury 直接读，或用固定备注
-    # 最稳方案：用 yfinance 的 ^IRX（13周国债收益率）作为近似
-    try:
-        value, _ = fetch_yfinance_last_close("^IRX")
-        if value is None:
-            raise ValueError("^IRX 为空")
-        # ^IRX 是年化百分比，直接用
-        return {"美联储基准利率": f"{value:.2f}"}
-    except Exception:
-        raise ValueError("美联储基准利率抓取失败（yfinance ^IRX）")
+    # 从纽约联储官方 JSON 获取联邦基金目标利率区间
+    url = "https://markets.newyorkfed.org/api/rates/effr/last/1.json"
+    resp = requests.get(url, headers=REQUEST_HEADERS, timeout=TIMEOUT)
+    resp.raise_for_status()
+    data = resp.json()
+    entry = data["refRates"][0]
+    lower = float(entry["targetRateLb"])
+    upper = float(entry["targetRateUb"])
+    return {"美联储基准利率": f"{lower:.2f}-{upper:.2f}"}
 
 
 def fetch_us2y_fred():
-    value, _ = fetch_yfinance_last_close("^IRX")
-    return {"美国2年期收益率": value}
+    # 美国财政部官方 API，返回最新2年期国债收益率
+    month = datetime.now().strftime("%Y%m")
+    url = f"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value={month}"
+    resp = requests.get(url, headers=REQUEST_HEADERS, timeout=TIMEOUT)
+    resp.raise_for_status()
+    # 解析 XML，取最后一条记录的 BC_2YEAR 字段
+    root = ET.fromstring(resp.text)
+    ns = {"m": "http://schemas.microsoft.com/ado/2007/08/dataservices/metadata",
+          "d": "http://schemas.microsoft.com/ado/2007/08/dataservices"}
+    entries = root.findall(".//{http://www.w3.org/2005/Atom}entry")
+    if not entries:
+        raise ValueError("Treasury 2Y 数据为空")
+    last = entries[-1]
+    val = last.find(".//d:BC_2YEAR", ns)
+    if val is None or val.text is None:
+        raise ValueError("Treasury 2Y 字段缺失")
+    return {"美国2年期收益率": float(val.text)}
 
 
 def fetch_us10y_fred():
@@ -244,26 +257,7 @@ def fetch_wti_eia():
 
 
 def fetch_vix():
-    """
-    主源：CBOE 官方页面
-    备源：Yahoo Finance
-    再备源：FRED VIXCLS
-    """
-    try:
-        html = get_url_text(CBOE_VIX_PAGE)
-        m = re.search(r'VIX Spot Price.*?\$?([0-9]+(?:\.[0-9]+)?)', html, flags=re.S | re.I)
-        if m:
-            return {"VIX": float(m.group(1))}
-    except Exception:
-        pass
-
-    try:
-        value, _ = fetch_yfinance_last_close(YF_FALLBACK["VIX"])
-        return {"VIX": value}
-    except Exception:
-        pass
-
-    value, _ = read_fred_last_value(FRED_VIX_CSV, "VIXCLS")
+    value, _ = fetch_yfinance_last_close("^VIX")
     return {"VIX": value}
 
 
