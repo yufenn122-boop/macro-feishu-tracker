@@ -75,7 +75,8 @@ def fetch_us10y_fred():
     value_col = None
 
     for c in df.columns:
-        if str(c).strip().lower() == "date":
+        col = str(c).strip().lower()
+        if col in ["date", "observation_date"]:
             date_col = c
         if str(c).strip().upper() == "DGS10":
             value_col = c
