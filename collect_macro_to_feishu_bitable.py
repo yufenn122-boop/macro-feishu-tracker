@@ -69,17 +69,30 @@ def fetch_us10y_fred():
     resp.raise_for_status()
 
     df = pd.read_csv(pd.io.common.StringIO(resp.text))
-    df.columns = [c.strip() for c in df.columns]
-    df["DGS10"] = pd.to_numeric(df["DGS10"], errors="coerce")
-    df = df.dropna(subset=["DGS10"])
+    df.columns = [str(c).strip() for c in df.columns]
+
+    date_col = None
+    value_col = None
+
+    for c in df.columns:
+        if str(c).strip().lower() == "date":
+            date_col = c
+        if str(c).strip().upper() == "DGS10":
+            value_col = c
+
+    if date_col is None or value_col is None:
+        raise ValueError(f"美债字段异常：{list(df.columns)}")
+
+    df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
+    df = df.dropna(subset=[value_col])
 
     if df.empty:
         raise ValueError("10年期美债收益率数据为空")
 
     last_row = df.iloc[-1]
     return {
-        "10年期美债收益率": safe_float(last_row["DGS10"]),
-        "10年期美债日期": normalize_date(last_row["DATE"]),
+        "10年期美债收益率": safe_float(last_row[value_col]),
+        "10年期美债日期": normalize_date(last_row[date_col]),
     }
 
 
