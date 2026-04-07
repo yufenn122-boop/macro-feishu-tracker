@@ -152,12 +152,6 @@ def fetch_hs300_pe():
     if df is None or df.empty:
         raise ValueError("沪深300市盈率数据为空")
 
-    date_col = None
-    for c in df.columns:
-        if str(c).strip() in ["日期", "date", "Date"]:
-            date_col = c
-            break
-
     pe_col = None
     for col in HS300_PE_CANDIDATE_COLUMNS:
         if col in df.columns:
@@ -176,37 +170,63 @@ def fetch_hs300_pe():
     last_row = df.iloc[-1]
     return {
         "沪深300市盈率": safe_float(last_row[pe_col]),
-        "沪深300市盈率类型": pe_col,
-        "沪深300日期": normalize_date(last_row[date_col]) if date_col else None,
     }
 
 
 def build_snapshot():
     snapshot = {
-        "运行时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "日期": datetime.now().strftime("%Y-%m-%d"),
+        "10年期美债收益率": "null",
+        "美元指数": "null",
+        "布伦特原油": "null",
+        "中国社融增量_亿元": "null",
+        "沪深300市盈率": "null",
     }
 
-    tasks = [
-        ("美债", fetch_us10y_fred),
-        ("美元指数", lambda: fetch_yahoo_last_close("DX-Y.NYB", "美元指数", "美元指数日期")),
-        ("布伦特原油", lambda: fetch_yahoo_last_close("BZ=F", "布伦特原油", "布伦特原油日期")),
-        ("中国社融", fetch_china_social_financing),
-        ("沪深300市盈率", fetch_hs300_pe),
-    ]
+    try:
+        log("开始抓取：美债")
+        data = fetch_us10y_fred()
+        snapshot["10年期美债收益率"] = data.get("10年期美债收益率", "null")
+        log("抓取成功：美债")
+    except Exception as e:
+        log(f"抓取失败：美债 | {e}")
+        log(traceback.format_exc())
 
-    for task_name, func in tasks:
-        try:
-            log(f"开始抓取：{task_name}")
-            data = func()
-            snapshot.update(data)
-            snapshot[f"{task_name}状态"] = "成功"
-            snapshot[f"{task_name}错误"] = ""
-            log(f"抓取成功：{task_name}")
-        except Exception as e:
-            snapshot[f"{task_name}状态"] = "失败"
-            snapshot[f"{task_name}错误"] = str(e)
-            log(f"抓取失败：{task_name} | {e}")
-            log(traceback.format_exc())
+    try:
+        log("开始抓取：美元指数")
+        data = fetch_yahoo_last_close("DX-Y.NYB", "美元指数", "美元指数日期")
+        snapshot["美元指数"] = data.get("美元指数", "null")
+        log("抓取成功：美元指数")
+    except Exception as e:
+        log(f"抓取失败：美元指数 | {e}")
+        log(traceback.format_exc())
+
+    try:
+        log("开始抓取：布伦特原油")
+        data = fetch_yahoo_last_close("BZ=F", "布伦特原油", "布伦特原油日期")
+        snapshot["布伦特原油"] = data.get("布伦特原油", "null")
+        log("抓取成功：布伦特原油")
+    except Exception as e:
+        log(f"抓取失败：布伦特原油 | {e}")
+        log(traceback.format_exc())
+
+    try:
+        log("开始抓取：中国社融")
+        data = fetch_china_social_financing()
+        snapshot["中国社融增量_亿元"] = data.get("中国社融增量_亿元", "null")
+        log("抓取成功：中国社融")
+    except Exception as e:
+        log(f"抓取失败：中国社融 | {e}")
+        log(traceback.format_exc())
+
+    try:
+        log("开始抓取：沪深300市盈率")
+        data = fetch_hs300_pe()
+        snapshot["沪深300市盈率"] = data.get("沪深300市盈率", "null")
+        log("抓取成功：沪深300市盈率")
+    except Exception as e:
+        log(f"抓取失败：沪深300市盈率 | {e}")
+        log(traceback.format_exc())
 
     return snapshot
 
@@ -225,36 +245,19 @@ def append_record_to_bitable(snapshot: dict):
 
     payload = {
         "fields": {
-            "运行时间": snapshot.get("运行时间", ""),
-            "10年期美债收益率": snapshot.get("10年期美债收益率", ""),
-            "10年期美债日期": snapshot.get("10年期美债日期", ""),
-            "美元指数": snapshot.get("美元指数", ""),
-            "美元指数日期": snapshot.get("美元指数日期", ""),
-            "布伦特原油": snapshot.get("布伦特原油", ""),
-            "布伦特原油日期": snapshot.get("布伦特原油日期", ""),
-            "中国社融增量_亿元": snapshot.get("中国社融增量_亿元", ""),
-            "中国社融月份": snapshot.get("中国社融月份", ""),
-            "沪深300市盈率": snapshot.get("沪深300市盈率", ""),
-            "沪深300市盈率类型": snapshot.get("沪深300市盈率类型", ""),
-            "沪深300日期": snapshot.get("沪深300日期", ""),
-            "美债状态": snapshot.get("美债状态", ""),
-            "美债错误": snapshot.get("美债错误", ""),
-            "美元指数状态": snapshot.get("美元指数状态", ""),
-            "美元指数错误": snapshot.get("美元指数错误", ""),
-            "布伦特原油状态": snapshot.get("布伦特原油状态", ""),
-            "布伦特原油错误": snapshot.get("布伦特原油错误", ""),
-            "中国社融状态": snapshot.get("中国社融状态", ""),
-            "中国社融错误": snapshot.get("中国社融错误", ""),
-            "沪深300市盈率状态": snapshot.get("沪深300市盈率状态", ""),
-            "沪深300市盈率错误": snapshot.get("沪深300市盈率错误", ""),
+            "日期": snapshot.get("日期", "null"),
+            "10年期美债收益率": snapshot.get("10年期美债收益率", "null"),
+            "美元指数": snapshot.get("美元指数", "null"),
+            "布伦特原油": snapshot.get("布伦特原油", "null"),
+            "中国社融增量_亿元": snapshot.get("中国社融增量_亿元", "null"),
+            "沪深300市盈率": snapshot.get("沪深300市盈率", "null"),
         }
     }
 
     resp = requests.post(url, headers=headers, json=payload, timeout=30)
-    resp.raise_for_status()
     data = resp.json()
 
-    if data.get("code") != 0:
+    if resp.status_code != 200 or data.get("code") != 0:
         raise RuntimeError(f"写入飞书多维表格失败: {data}")
 
     log("已写入飞书多维表格")
