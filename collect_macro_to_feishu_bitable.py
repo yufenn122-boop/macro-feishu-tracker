@@ -1,4 +1,7 @@
 import os
+import re
+import json
+import math
 import traceback
 from datetime import datetime
 
@@ -7,10 +10,36 @@ import requests
 import yfinance as yf
 import akshare as ak
 
+
+# =========================
+# 配置区
+# =========================
+TIMEOUT = 30
+
 FRED_DGS10_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10"
 FRED_DGS2_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS2"
 FRED_FEDFUNDS_TARGET_UPPER_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARU"
 FRED_FEDFUNDS_TARGET_LOWER_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARL"
+FRED_VIX_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS"
+FRED_WTI_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DCOILWTICO"  # fallback
+
+EIA_WTI_PAGE = "https://www.eia.gov/dnav/pet/hist/rwtcm.htm"
+CBOE_VIX_PAGE = "https://www.cboe.com/tradable-products/vix/"
+
+INVESTING_DXY_PAGE = "https://www.investing.com/indices/usdollar"
+INVESTING_COPPER_PAGE = "https://www.investing.com/commodities/copper"
+INVESTING_USDCNH_PAGE = "https://www.investing.com/currencies/usd-cnh"
+
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
+REQUEST_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.google.com/",
+}
 
 HS300_PE_CANDIDATE_COLUMNS = [
     "滚动市盈率",
@@ -21,9 +50,23 @@ HS300_PE_CANDIDATE_COLUMNS = [
     "等权静态市盈率",
 ]
 
+YF_FALLBACK = {
+    "DXY": "DX-Y.NYB",
+    "COPPER": "HG=F",
+    "USDCNH": "CNH=X",
+    "VIX": "^VIX",
+}
 
+
+# =========================
+# 工具函数
+# =========================
 def log(msg: str):
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
+
+
+def is_valid_number(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and not math.isnan(x)
 
 
 def safe_float(x):
@@ -44,6 +87,110 @@ def normalize_date(x):
         return str(x)
 
 
+def get_url_text(url: str) -> str:
+    resp = requests.get(url, headers=REQUEST_HEADERS, timeout=TIMEOUT)
+    resp.raise_for_status()
+    return resp.text
+
+
+def parse_first_number(text: str):
+    """
+    从一段文本中提取第一个看起来像价格的数值，支持千分位逗号。
+    """
+    if not text:
+        return None
+    candidates = re.findall(r'(?<!\d)(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+\.\d+|\d+)(?!\d)', text)
+    for c in candidates:
+        try:
+            return float(c.replace(",", ""))
+        except Exception:
+            continue
+    return None
+
+
+def read_fred_last_value(csv_url: str, value_name: str):
+    resp = requests.get(csv_url, headers=REQUEST_HEADERS, timeout=TIMEOUT)
+    resp.raise_for_status()
+
+    df = pd.read_csv(pd.io.common.StringIO(resp.text))
+    df.columns = [str(c).strip() for c in df.columns]
+
+    date_col = None
+    value_col = None
+
+    for c in df.columns:
+        col = str(c).strip().lower()
+        if col in ["date", "observation_date"]:
+            date_col = c
+        if str(c).strip().upper() == value_name.upper():
+            value_col = c
+
+    if date_col is None or value_col is None:
+        raise ValueError(f"FRED 字段异常：{list(df.columns)}")
+
+    df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
+    df = df.dropna(subset=[value_col])
+
+    if df.empty:
+        raise ValueError(f"{value_name} 数据为空")
+
+    last_row = df.iloc[-1]
+    return safe_float(last_row[value_col]), normalize_date(last_row[date_col])
+
+
+def fetch_yfinance_last_close(symbol: str):
+    ticker = yf.Ticker(symbol)
+    hist = ticker.history(period="10d", interval="1d", auto_adjust=False)
+    if hist is None or hist.empty:
+        raise ValueError(f"{symbol} history 为空")
+
+    hist = hist.dropna(subset=["Close"])
+    if hist.empty:
+        raise ValueError(f"{symbol} 无有效收盘价")
+
+    last_row = hist.iloc[-1]
+    last_idx = hist.index[-1]
+    return safe_float(last_row["Close"]), pd.to_datetime(last_idx).strftime("%Y-%m-%d")
+
+
+def extract_investing_price(html: str):
+    """
+    Investing 页面结构常改，这里做多模式兜底。
+    """
+    patterns = [
+        r'data-test="instrument-price-last">([^<]+)<',
+        r'"last_last","([^"]+)"',
+        r'"last":"([^"]+)"',
+        r'"price":"([^"]+)"',
+        r'What Is the Current .*? exchange rate is ([0-9.,]+)',
+        r'current .*? is ([0-9.,]+), with a previous close',
+    ]
+
+    for p in patterns:
+        m = re.search(p, html, flags=re.I | re.S)
+        if m:
+            val = parse_first_number(m.group(1))
+            if val is not None:
+                return val
+
+    # 最后兜底：找一些附近关键词
+    keyword_patterns = [
+        r'Price[^0-9]{0,30}([0-9][0-9,]*\.?[0-9]*)',
+        r'Last[^0-9]{0,30}([0-9][0-9,]*\.?[0-9]*)',
+    ]
+    for p in keyword_patterns:
+        m = re.search(p, html, flags=re.I | re.S)
+        if m:
+            val = parse_first_number(m.group(1))
+            if val is not None:
+                return val
+
+    raise ValueError("Investing 页面价格解析失败")
+
+
+# =========================
+# 飞书
+# =========================
 def get_tenant_access_token():
     app_id = os.environ["FEISHU_APP_ID"]
     app_secret = os.environ["FEISHU_APP_SECRET"]
@@ -51,11 +198,8 @@ def get_tenant_access_token():
     url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
     resp = requests.post(
         url,
-        json={
-            "app_id": app_id,
-            "app_secret": app_secret,
-        },
-        timeout=30,
+        json={"app_id": app_id, "app_secret": app_secret},
+        timeout=TIMEOUT,
     )
     resp.raise_for_status()
     data = resp.json()
@@ -66,125 +210,113 @@ def get_tenant_access_token():
     return data["tenant_access_token"]
 
 
-def fetch_us10y_fred():
-    resp = requests.get(FRED_DGS10_CSV, timeout=30)
-    resp.raise_for_status()
+# =========================
+# 数据抓取：官方/FRED
+# =========================
+def fetch_fed_rate_target():
+    lower, _ = read_fred_last_value(FRED_FEDFUNDS_TARGET_LOWER_CSV, "DFEDTARL")
+    upper, _ = read_fred_last_value(FRED_FEDFUNDS_TARGET_UPPER_CSV, "DFEDTARU")
 
-    df = pd.read_csv(pd.io.common.StringIO(resp.text))
-    df.columns = [str(c).strip() for c in df.columns]
+    if lower is None or upper is None:
+        raise ValueError("美联储基准利率为空")
 
-    date_col = None
-    value_col = None
+    return {"美联储基准利率": f"{lower:.2f}-{upper:.2f}"}
 
-    for c in df.columns:
-        col = str(c).strip().lower()
-        if col in ["date", "observation_date"]:
-            date_col = c
-        if str(c).strip().upper() == "DGS10":
-            value_col = c
-
-    if date_col is None or value_col is None:
-        raise ValueError(f"美债字段异常：{list(df.columns)}")
-
-    df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
-    df = df.dropna(subset=[value_col])
-
-    if df.empty:
-        raise ValueError("10年期美债收益率数据为空")
-
-    last_row = df.iloc[-1]
-    return {
-        "10年期美债收益率": safe_float(last_row[value_col]),
-        "10年期美债日期": normalize_date(last_row[date_col]),
-    }
 
 def fetch_us2y_fred():
-    resp = requests.get(FRED_DGS2_CSV, timeout=30)
-    resp.raise_for_status()
-
-    df = pd.read_csv(pd.io.common.StringIO(resp.text))
-    df.columns = [str(c).strip() for c in df.columns]
-
-    date_col = None
-    value_col = None
-
-    for c in df.columns:
-        col = str(c).strip().lower()
-        if col in ["date", "observation_date"]:
-            date_col = c
-        if str(c).strip().upper() == "DGS2":
-            value_col = c
-
-    if date_col is None or value_col is None:
-        raise ValueError(f"美国2年期收益率字段异常：{list(df.columns)}")
-
-    df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
-    df = df.dropna(subset=[value_col])
-
-    if df.empty:
-        raise ValueError("美国2年期收益率数据为空")
-
-    last_row = df.iloc[-1]
-    return {
-        "美国2年期收益率": safe_float(last_row[value_col]),
-    }
-
-def fetch_fed_rate_target():
-    def _read_target_csv(url, value_name):
-        resp = requests.get(url, timeout=30)
-        resp.raise_for_status()
-
-        df = pd.read_csv(pd.io.common.StringIO(resp.text))
-        df.columns = [str(c).strip() for c in df.columns]
-
-        date_col = None
-        value_col = None
-
-        for c in df.columns:
-            col = str(c).strip().lower()
-            if col in ["date", "observation_date"]:
-                date_col = c
-            if str(c).strip().upper() == value_name.upper():
-                value_col = c
-
-        if date_col is None or value_col is None:
-            raise ValueError(f"美联储基准利率字段异常：{list(df.columns)}")
-
-        df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
-        df = df.dropna(subset=[value_col])
-
-        if df.empty:
-            raise ValueError("美联储基准利率数据为空")
-
-        return df.iloc[-1][value_col]
-
-    lower = _read_target_csv(FRED_FEDFUNDS_TARGET_LOWER_CSV, "DFEDTARL")
-    upper = _read_target_csv(FRED_FEDFUNDS_TARGET_UPPER_CSV, "DFEDTARU")
-
-    return {
-        "美联储基准利率": f"{safe_float(lower):.2f}-{safe_float(upper):.2f}"
-    }
-
-def fetch_yahoo_last_close(symbol: str, value_col_name: str, date_col_name: str):
-    ticker = yf.Ticker(symbol)
-    hist = ticker.history(period="10d", interval="1d", auto_adjust=False)
-
-    if hist is None or hist.empty:
-        raise ValueError(f"{symbol} 数据为空")
-
-    hist = hist.dropna(subset=["Close"])
-    if hist.empty:
-        raise ValueError(f"{symbol} 无有效收盘价")
-
-    last_row = hist.iloc[-1]
-    last_idx = hist.index[-1]
-
-    return {
-        value_col_name: safe_float(last_row["Close"]),
-        date_col_name: pd.to_datetime(last_idx).strftime("%Y-%m-%d"),
-    }
+    value, _ = read_fred_last_value(FRED_DGS2_CSV, "DGS2")
+    return {"美国2年期收益率": value}
 
 
+def fetch_us10y_fred():
+    value, _ = read_fred_last_value(FRED_DGS10_CSV, "DGS10")
+    return {"美国10年期收益率": value}
+
+
+def fetch_wti_eia():
+    """
+    主源：EIA 页面
+    兜底：FRED 的 DCOILWTICO（来源也是 EIA）
+    """
+    try:
+        html = get_url_text(EIA_WTI_PAGE)
+        # EIA 页面常出现 "2026-03-30 104.69" 这种观察值
+        pairs = re.findall(r'(\d{4}-\d{2}-\d{2})\s*[: ]\s*([0-9]+(?:\.[0-9]+)?)', html)
+        if pairs:
+            _, value = pairs[-1]
+            return {"WTI原油": float(value)}
+
+        # 再兜底按 "Observations ... 104.69"
+        m = re.search(r'Observations.*?([0-9]+\.[0-9]+)', html, flags=re.S | re.I)
+        if m:
+            return {"WTI原油": float(m.group(1))}
+    except Exception:
+        pass
+
+    value, _ = read_fred_last_value(FRED_WTI_CSV, "DCOILWTICO")
+    return {"WTI原油": value}
+
+
+def fetch_vix():
+    """
+    主源：CBOE 官方页面
+    备源：Yahoo Finance
+    再备源：FRED VIXCLS
+    """
+    try:
+        html = get_url_text(CBOE_VIX_PAGE)
+        m = re.search(r'VIX Spot Price.*?\$?([0-9]+(?:\.[0-9]+)?)', html, flags=re.S | re.I)
+        if m:
+            return {"VIX": float(m.group(1))}
+    except Exception:
+        pass
+
+    try:
+        value, _ = fetch_yfinance_last_close(YF_FALLBACK["VIX"])
+        return {"VIX": value}
+    except Exception:
+        pass
+
+    value, _ = read_fred_last_value(FRED_VIX_CSV, "VIXCLS")
+    return {"VIX": value}
+
+
+# =========================
+# 数据抓取：Investing 主源 + 备源
+# =========================
+def fetch_dxy():
+    try:
+        html = get_url_text(INVESTING_DXY_PAGE)
+        value = extract_investing_price(html)
+        return {"美元指数DXY": value}
+    except Exception:
+        value, _ = fetch_yfinance_last_close(YF_FALLBACK["DXY"])
+        return {"美元指数DXY": value}
+
+
+def fetch_copper():
+    try:
+        html = get_url_text(INVESTING_COPPER_PAGE)
+        value = extract_investing_price(html)
+        return {"铜价": value}
+    except Exception:
+        value, _ = fetch_yfinance_last_close(YF_FALLBACK["COPPER"])
+        return {"铜价": value}
+
+
+def fetch_usdcnh():
+    try:
+        html = get_url_text(INVESTING_USDCNH_PAGE)
+        value = extract_investing_price(html)
+        return {"USD/CNH": value}
+    except Exception:
+        value, _ = fetch_yfinance_last_close(YF_FALLBACK["USDCNH"])
+        return {"USD/CNH": value}
+
+
+# =========================
+# 中国数据
+# =========================
 def fetch_china_social_financing():
     df = ak.macro_china_shrzgm()
     if df is None or df.empty:
@@ -209,13 +341,13 @@ def fetch_china_social_financing():
         raise ValueError("中国社融有效数据为空")
 
     last_row = df.iloc[-1]
-    return {
-        "中国社融增量_亿元": safe_float(last_row[value_col]),
-        "中国社融月份": str(last_row[month_col]),
-    }
+    return {"中国社融增量_亿元": safe_float(last_row[value_col])}
 
 
 def fetch_hs300_pe():
+    """
+    自动化上先用稳定备源，避免中证官网 JS 结构变化导致任务天天挂。
+    """
     df = ak.stock_index_pe_lg(symbol="沪深300")
     if df is None or df.empty:
         raise ValueError("沪深300市盈率数据为空")
@@ -236,92 +368,56 @@ def fetch_hs300_pe():
         raise ValueError("沪深300市盈率有效数据为空")
 
     last_row = df.iloc[-1]
-    return {
-        "沪深300市盈率": safe_float(last_row[pe_col]),
-    }
+    return {"沪深300市盈率": safe_float(last_row[pe_col])}
 
 
+# =========================
+# 汇总
+# =========================
 def build_snapshot():
     snapshot = {
-    "日期": datetime.now().strftime("%Y-%m-%d"),
-    "美联储基准利率": "null",
-    "美国2年期收益率": "None",
-    "美国10年期收益率": "None",
-    "美元指数DXY": "None",
-    "WTI原油": "None",
-    "铜价": "None",
-    "USD/CNH": "None",
-    "VIX": "None",
-    "中国社融增量_亿元": "None",
-    "沪深300市盈率": "None",
+        "日期": datetime.now().strftime("%Y-%m-%d"),
+        "美联储基准利率": "",
+        "美国2年期收益率": None,
+        "美国10年期收益率": None,
+        "美元指数DXY": None,
+        "WTI原油": None,
+        "铜价": None,
+        "USD/CNH": None,
+        "VIX": None,
+        "中国社融增量_亿元": None,
+        "沪深300市盈率": None,
     }
 
-    try:
-        log("开始抓取：美联储基准利率")
-        data = fetch_fed_rate_target()
-        snapshot["美联储基准利率"] = data.get("美联储基准利率", "null")
-        log("抓取成功：美联储基准利率")
-    except Exception as e:
-        log(f"抓取失败：美联储基准利率 | {e}")
-        log(traceback.format_exc())
+    tasks = [
+        ("美联储基准利率", fetch_fed_rate_target, "美联储基准利率"),
+        ("美国2年期收益率", fetch_us2y_fred, "美国2年期收益率"),
+        ("美国10年期收益率", fetch_us10y_fred, "美国10年期收益率"),
+        ("美元指数DXY", fetch_dxy, "美元指数DXY"),
+        ("WTI原油", fetch_wti_eia, "WTI原油"),
+        ("铜价", fetch_copper, "铜价"),
+        ("USD/CNH", fetch_usdcnh, "USD/CNH"),
+        ("VIX", fetch_vix, "VIX"),
+        ("中国社融", fetch_china_social_financing, "中国社融增量_亿元"),
+        ("沪深300市盈率", fetch_hs300_pe, "沪深300市盈率"),
+    ]
 
-    try:
-        log("开始抓取：美国2年期收益率")
-        data = fetch_us2y_fred()
-        snapshot["美国2年期收益率"] = data.get("美国2年期收益率", "None")
-        log("抓取成功：美国2年期收益率")
-    except Exception as e:
-        log(f"抓取失败：美国2年期收益率 | {e}")
-        log(traceback.format_exc())
-    
-    try:
-        log("开始抓取：美债")
-        data = fetch_us10y_fred()
-        snapshot["美国10年期收益率"] = data.get("10年期美债收益率", "None")
-        log("抓取成功：美债")
-    except Exception as e:
-        log(f"抓取失败：美债 | {e}")
-        log(traceback.format_exc())
-
-    try:
-        log("开始抓取：美元指数")
-        data = fetch_yahoo_last_close("DX-Y.NYB", "美元指数DXY", "美元指数日期")
-        snapshot["美元指数DXY"] = data.get("美元指数DXY", "None")
-        log("抓取成功：美元指数")
-    except Exception as e:
-        log(f"抓取失败：美元指数 | {e}")
-        log(traceback.format_exc())
-
-    try:
-        log("开始抓取：布伦特原油")
-        data = fetch_yahoo_last_close("BZ=F", "布伦特原油", "布伦特原油日期")
-        snapshot["WTI原油"] = data.get("布伦特原油", "None")
-        log("抓取成功：布伦特原油")
-    except Exception as e:
-        log(f"抓取失败：布伦特原油 | {e}")
-        log(traceback.format_exc())
-
-    try:
-        log("开始抓取：中国社融")
-        data = fetch_china_social_financing()
-        snapshot["中国社融增量_亿元"] = data.get("中国社融增量_亿元", "None")
-        log("抓取成功：中国社融")
-    except Exception as e:
-        log(f"抓取失败：中国社融 | {e}")
-        log(traceback.format_exc())
-
-    try:
-        log("开始抓取：沪深300市盈率")
-        data = fetch_hs300_pe()
-        snapshot["沪深300市盈率"] = data.get("沪深300市盈率", "None")
-        log("抓取成功：沪深300市盈率")
-    except Exception as e:
-        log(f"抓取失败：沪深300市盈率 | {e}")
-        log(traceback.format_exc())
+    for task_name, func, field_name in tasks:
+        try:
+            log(f"开始抓取：{task_name}")
+            data = func()
+            snapshot[field_name] = data.get(field_name, snapshot[field_name])
+            log(f"抓取成功：{task_name}")
+        except Exception as e:
+            log(f"抓取失败：{task_name} | {e}")
+            log(traceback.format_exc())
 
     return snapshot
 
 
+# =========================
+# 写入飞书
+# =========================
 def append_record_to_bitable(snapshot: dict):
     tenant_access_token = get_tenant_access_token()
     app_token = os.environ["FEISHU_BITABLE_APP_TOKEN"]
@@ -353,20 +449,19 @@ def append_record_to_bitable(snapshot: dict):
 
     for field_name in optional_number_fields:
         value = snapshot.get(field_name, None)
-        if value is not None:
+        if is_valid_number(value):
             fields[field_name] = value
 
-    payload = {
-        "fields": fields
-    }
+    payload = {"fields": fields}
 
-    resp = requests.post(url, headers=headers, json=payload, timeout=30)
+    resp = requests.post(url, headers=headers, json=payload, timeout=TIMEOUT)
     data = resp.json()
 
     if resp.status_code != 200 or data.get("code") != 0:
         raise RuntimeError(f"写入飞书多维表格失败: {data}")
 
     log("已写入飞书多维表格")
+    log(json.dumps(fields, ensure_ascii=False))
 
 
 def main():
