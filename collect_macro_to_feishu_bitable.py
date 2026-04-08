@@ -298,13 +298,15 @@ def fetch_copper():
 
 
 def fetch_usdcnh():
-    try:
-        html = get_url_text(INVESTING_USDCNH_PAGE)
-        value = extract_investing_price(html)
-        return {"USD/CNH": value}
-    except Exception:
-        value, _ = fetch_yfinance_last_close(YF_FALLBACK["USDCNH"])
-        return {"USD/CNH": value}
+    # 依次尝试多个 ticker，CNH=X 在 GitHub Actions 环境下经常返回空
+    for symbol in ["USDCNH=X", "CNY=X", "CNH=X"]:
+        try:
+            value, _ = fetch_yfinance_last_close(symbol)
+            if value is not None and 5 < value < 10:
+                return {"USD/CNH": value}
+        except Exception:
+            continue
+    raise ValueError("USD/CNH 所有数据源均失败")
 
 
 # =========================
