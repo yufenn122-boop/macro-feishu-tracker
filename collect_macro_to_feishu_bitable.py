@@ -215,17 +215,10 @@ def get_tenant_access_token():
 # 数据抓取：官方/FRED
 # =========================
 def fetch_fed_rate_target():
-    # FRED 在 GitHub Actions 被封，用 akshare 获取美联储利率
-    df = ak.macro_bank_usa_interest_rate()
-    if df is None or df.empty:
-        raise ValueError("美联储利率数据为空")
-    df.columns = [str(c).strip() for c in df.columns]
-    # 过滤掉未来日期（预测值），取最近已发布的非空值
-    for _, row in df.iloc[::-1].iterrows():
-        val = safe_float(row.get("今值")) or safe_float(row.get("前值"))
-        if val is not None:
-            return {"美联储基准利率": f"{val:.2f}"}
-    raise ValueError("美联储利率今值和前值均为空")
+    # FOMC 一年只开8次会，每次开完手动更新这一行
+    # 最近一次：2026-03-18，维持 3.50-3.75
+    # 下次会议：2026-05-06
+    return {"美联储基准利率": "3.50-3.75"}
 
 
 def fetch_us2y_fred():
