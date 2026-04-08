@@ -229,32 +229,29 @@ def fetch_fed_rate_target():
 
 
 def fetch_us2y_fred():
-    # Treasury 官方收益率曲线 API，不依赖 FRED
-    for delta in [0, -1]:
-        dt = datetime.now()
-        if delta == -1:
-            dt = dt.replace(month=dt.month - 1) if dt.month > 1 else dt.replace(year=dt.year - 1, month=12)
-        month = dt.strftime("%Y%m")
-        url = f"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value={month}"
-        resp = requests.get(url, headers=REQUEST_HEADERS, timeout=TIMEOUT)
-        resp.raise_for_status()
-        root = ET.fromstring(resp.text)
-        ns = {"d": "http://schemas.microsoft.com/ado/2007/08/dataservices"}
-        entries = root.findall(".//{http://www.w3.org/2005/Atom}entry")
-        if not entries:
-            continue
-        val = entries[-1].find(".//d:BC_2YEAR", ns)
-        if val is not None and val.text:
-            return {"美国2年期收益率": float(val.text)}
-    raise ValueError("Treasury 2Y 数据为空")
+    # akshare bond_zh_us_rate，列7是美国2年期（列1是中国2年期，之前取错了）
+    df = ak.bond_zh_us_rate(start_date="20260101")
+    if df is None or df.empty:
+        raise ValueError("美国国债收益率数据为空")
+    col = df.columns[7]  # 美国2年期固定在第8列
+    df[col] = pd.to_numeric(df[col], errors="coerce")
+    df = df.dropna(subset=[col])
+    if df.empty:
+        raise ValueError("美国2年期收益率有效数据为空")
+    return {"美国2年期收益率": safe_float(df.iloc[-1][col])}
 
 
 def fetch_us10y_fred():
-    # yfinance ^TNX，不依赖 FRED
-    value, _ = fetch_yfinance_last_close("^TNX")
-    if value is None:
-        raise ValueError("美国10年期收益率为空")
-    return {"美国10年期收益率": value}
+    # akshare bond_zh_us_rate，列9是美国10年期
+    df = ak.bond_zh_us_rate(start_date="20260101")
+    if df is None or df.empty:
+        raise ValueError("美国国债收益率数据为空")
+    col = df.columns[9]  # 美国10年期固定在第10列
+    df[col] = pd.to_numeric(df[col], errors="coerce")
+    df = df.dropna(subset=[col])
+    if df.empty:
+        raise ValueError("美国10年期收益率有效数据为空")
+    return {"美国10年期收益率": safe_float(df.iloc[-1][col])}
 
 
 def fetch_wti_eia():
