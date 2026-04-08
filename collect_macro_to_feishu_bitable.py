@@ -249,15 +249,15 @@ def fetch_us10y_fred():
 
 
 def fetch_wti_eia():
-    # 主源：FRED DCOILWTICO（EIA WTI 现货价格，日度更新）
+    # 主源：yfinance CL=F（实时期货价格）
     try:
-        value, _ = read_fred_last_value(FRED_WTI_CSV, "DCOILWTICO")
-        if value is not None:
+        value, _ = fetch_yfinance_last_close("CL=F")
+        if value is not None and value < 200:  # 过滤明显异常值
             return {"WTI原油": value}
     except Exception:
         pass
-    # 备源：yfinance CL=F
-    value, _ = fetch_yfinance_last_close("CL=F")
+    # 备源：FRED DCOILWTICO（有1-2天延迟）
+    value, _ = read_fred_last_value(FRED_WTI_CSV, "DCOILWTICO")
     if value is None:
         raise ValueError("WTI原油数据为空")
     return {"WTI原油": value}
