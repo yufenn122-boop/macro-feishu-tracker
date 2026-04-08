@@ -263,7 +263,6 @@ def fetch_wti_eia():
     return {"WTI原油": value}
 
 
-
 def fetch_vix():
     value, _ = fetch_yfinance_last_close("^VIX")
     return {"VIX": value}
