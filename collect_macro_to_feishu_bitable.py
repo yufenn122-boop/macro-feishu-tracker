@@ -215,22 +215,43 @@ def get_tenant_access_token():
 # 数据抓取：官方/FRED
 # =========================
 def fetch_fed_rate_target():
-    lower, _ = read_fred_last_value(FRED_FEDFUNDS_TARGET_LOWER_CSV, "DFEDTARL")
-    upper, _ = read_fred_last_value(FRED_FEDFUNDS_TARGET_UPPER_CSV, "DFEDTARU")
-    if lower is None or upper is None:
-        raise ValueError("美联储基准利率为空")
-    return {"美联储基准利率": f"{lower:.2f}-{upper:.2f}"}
+    # FRED 在 GitHub Actions 被封，用 akshare 获取美联储利率
+    df = ak.macro_bank_usa_interest_rate()
+    if df is None or df.empty:
+        raise ValueError("美联储利率数据为空")
+    df.columns = [str(c).strip() for c in df.columns]
+    # 过滤掉未来日期（预测值），取最近已发布的非空值
+    for _, row in df.iloc[::-1].iterrows():
+        val = safe_float(row.get("今值")) or safe_float(row.get("前值"))
+        if val is not None:
+            return {"美联储基准利率": f"{val:.2f}"}
+    raise ValueError("美联储利率今值和前值均为空")
 
 
 def fetch_us2y_fred():
-    value, _ = read_fred_last_value(FRED_DGS2_CSV, "DGS2")
-    if value is None:
-        raise ValueError("美国2年期收益率为空")
-    return {"美国2年期收益率": value}
+    # Treasury 官方收益率曲线 API，不依赖 FRED
+    for delta in [0, -1]:
+        dt = datetime.now()
+        if delta == -1:
+            dt = dt.replace(month=dt.month - 1) if dt.month > 1 else dt.replace(year=dt.year - 1, month=12)
+        month = dt.strftime("%Y%m")
+        url = f"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value={month}"
+        resp = requests.get(url, headers=REQUEST_HEADERS, timeout=TIMEOUT)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+        ns = {"d": "http://schemas.microsoft.com/ado/2007/08/dataservices"}
+        entries = root.findall(".//{http://www.w3.org/2005/Atom}entry")
+        if not entries:
+            continue
+        val = entries[-1].find(".//d:BC_2YEAR", ns)
+        if val is not None and val.text:
+            return {"美国2年期收益率": float(val.text)}
+    raise ValueError("Treasury 2Y 数据为空")
 
 
 def fetch_us10y_fred():
-    value, _ = read_fred_last_value(FRED_DGS10_CSV, "DGS10")
+    # yfinance ^TNX，不依赖 FRED
+    value, _ = fetch_yfinance_last_close("^TNX")
     if value is None:
         raise ValueError("美国10年期收益率为空")
     return {"美国10年期收益率": value}
