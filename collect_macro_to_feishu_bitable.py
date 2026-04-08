@@ -215,36 +215,24 @@ def get_tenant_access_token():
 # 数据抓取：官方/FRED
 # =========================
 def fetch_fed_rate_target():
-    # akshare 数据质量不稳定，改用 yfinance ^IRX（13周国债，短端利率近似）
-    value, _ = fetch_yfinance_last_close("^IRX")
-    if value is None:
-        raise ValueError("^IRX 为空")
-    return {"美联储基准利率": f"{value:.2f}"}
+    lower, _ = read_fred_last_value(FRED_FEDFUNDS_TARGET_LOWER_CSV, "DFEDTARL")
+    upper, _ = read_fred_last_value(FRED_FEDFUNDS_TARGET_UPPER_CSV, "DFEDTARU")
+    if lower is None or upper is None:
+        raise ValueError("美联储基准利率为空")
+    return {"美联储基准利率": f"{lower:.2f}-{upper:.2f}"}
 
 
 def fetch_us2y_fred():
-    # akshare 美国2年期国债收益率，比 Treasury XML 更稳定
-    df = ak.bond_zh_us_rate(start_date="20250101")
-    if df is None or df.empty:
-        raise ValueError("美国国债收益率数据为空")
-    df.columns = [str(c).strip() for c in df.columns]
-    # 找2年期列
-    col_2y = None
-    for c in df.columns:
-        if "2" in c and ("年" in c or "year" in c.lower() or "Y" in c):
-            col_2y = c
-            break
-    if col_2y is None:
-        raise ValueError(f"未找到2年期列，列名：{list(df.columns)}")
-    df[col_2y] = pd.to_numeric(df[col_2y], errors="coerce")
-    df = df.dropna(subset=[col_2y])
-    if df.empty:
-        raise ValueError("2年期收益率有效数据为空")
-    return {"美国2年期收益率": safe_float(df.iloc[-1][col_2y])}
+    value, _ = read_fred_last_value(FRED_DGS2_CSV, "DGS2")
+    if value is None:
+        raise ValueError("美国2年期收益率为空")
+    return {"美国2年期收益率": value}
 
 
 def fetch_us10y_fred():
-    value, _ = fetch_yfinance_last_close("^TNX")
+    value, _ = read_fred_last_value(FRED_DGS10_CSV, "DGS10")
+    if value is None:
+        raise ValueError("美国10年期收益率为空")
     return {"美国10年期收益率": value}
 
 
@@ -298,15 +286,10 @@ def fetch_copper():
 
 
 def fetch_usdcnh():
-    # 依次尝试多个 ticker，CNH=X 在 GitHub Actions 环境下经常返回空
-    for symbol in ["USDCNH=X", "CNY=X", "CNH=X"]:
-        try:
-            value, _ = fetch_yfinance_last_close(symbol)
-            if value is not None and 5 < value < 10:
-                return {"USD/CNH": value}
-        except Exception:
-            continue
-    raise ValueError("USD/CNH 所有数据源均失败")
+    value, _ = fetch_yfinance_last_close("USDCNH=X")
+    if value is None or not (5 < value < 10):
+        raise ValueError(f"USD/CNH 数据异常: {value}")
+    return {"USD/CNH": value}
 
 
 # =========================
