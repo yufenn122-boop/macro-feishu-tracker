@@ -256,23 +256,11 @@ def fetch_wti_eia():
             return {"WTI原油": value}
     except Exception:
         pass
-    # 备源：akshare
-    df = ak.macro_energy_oil_hist(symbol="WTI")
-    if df is None or df.empty:
+    # 备源：yfinance CL=F
+    value, _ = fetch_yfinance_last_close("CL=F")
+    if value is None:
         raise ValueError("WTI原油数据为空")
-    df.columns = [str(c).strip() for c in df.columns]
-    price_col = None
-    for c in df.columns:
-        if "收盘" in c or "close" in c.lower() or "价格" in c or "price" in c.lower():
-            price_col = c
-            break
-    if price_col is None:
-        price_col = df.columns[-1]
-    df[price_col] = pd.to_numeric(df[price_col], errors="coerce")
-    df = df.dropna(subset=[price_col])
-    if df.empty:
-        raise ValueError("WTI原油有效数据为空")
-    return {"WTI原油": safe_float(df.iloc[-1][price_col])}
+    return {"WTI原油": value}
 
 
 def fetch_vix():
