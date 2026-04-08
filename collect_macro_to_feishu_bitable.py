@@ -249,14 +249,20 @@ def fetch_us10y_fred():
 
 
 def fetch_wti_eia():
-    # 主源：yfinance CL=F（实时期货价格）
+    # 主源：EIA 官方 API（无需 key，返回 WTI 现货价格）
     try:
-        value, _ = fetch_yfinance_last_close("CL=F")
-        if value is not None and value < 200:  # 过滤明显异常值
-            return {"WTI原油": value}
+        url = "https://api.eia.gov/v2/petroleum/pri/spt/data/?api_key=DEMO_KEY&frequency=daily&data[0]=value&sort[0][column]=period&sort[0][direction]=desc&length=5&facets[product][]=EPCWTI"
+        resp = requests.get(url, headers=REQUEST_HEADERS, timeout=TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        rows = data.get("response", {}).get("data", [])
+        for row in rows:
+            val = safe_float(row.get("value"))
+            if val is not None and 20 < val < 300:
+                return {"WTI原油": val}
     except Exception:
         pass
-    # 备源：FRED DCOILWTICO（有1-2天延迟）
+    # 备源：FRED DCOILWTICO（1-2天延迟）
     value, _ = read_fred_last_value(FRED_WTI_CSV, "DCOILWTICO")
     if value is None:
         raise ValueError("WTI原油数据为空")
