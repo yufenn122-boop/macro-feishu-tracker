@@ -215,16 +215,11 @@ def get_tenant_access_token():
 # 数据抓取：官方/FRED
 # =========================
 def fetch_fed_rate_target():
-    df = ak.macro_bank_usa_interest_rate()
-    if df is None or df.empty:
-        raise ValueError("美联储利率数据为空")
-    df.columns = [str(c).strip() for c in df.columns]
-    last = df.iloc[-1]
-    # 今值为空时用前值（非决议日今值是 NaN）
-    val = safe_float(last.get("今值")) or safe_float(last.get("前值"))
-    if val is None:
-        raise ValueError(f"美联储利率今值和前值均为空，列：{list(df.columns)}")
-    return {"美联储基准利率": f"{val:.2f}"}
+    # akshare 数据质量不稳定，改用 yfinance ^IRX（13周国债，短端利率近似）
+    value, _ = fetch_yfinance_last_close("^IRX")
+    if value is None:
+        raise ValueError("^IRX 为空")
+    return {"美联储基准利率": f"{value:.2f}"}
 
 
 def fetch_us2y_fred():
@@ -254,27 +249,30 @@ def fetch_us10y_fred():
 
 
 def fetch_wti_eia():
-    # 主源：akshare 原油现货价格
+    # 主源：FRED DCOILWTICO（EIA WTI 现货价格，日度更新）
     try:
-        df = ak.macro_energy_oil_hist(symbol="WTI")
-        if df is not None and not df.empty:
-            df.columns = [str(c).strip() for c in df.columns]
-            price_col = None
-            for c in df.columns:
-                if "收盘" in c or "close" in c.lower() or "价格" in c or "price" in c.lower():
-                    price_col = c
-                    break
-            if price_col is None:
-                price_col = df.columns[-1]
-            df[price_col] = pd.to_numeric(df[price_col], errors="coerce")
-            df = df.dropna(subset=[price_col])
-            if not df.empty:
-                return {"WTI原油": safe_float(df.iloc[-1][price_col])}
+        value, _ = read_fred_last_value(FRED_WTI_CSV, "DCOILWTICO")
+        if value is not None:
+            return {"WTI原油": value}
     except Exception:
         pass
-    # 备源：yfinance BZ=F（布伦特，与WTI价差约2-3美元）
-    value, _ = fetch_yfinance_last_close("BZ=F")
-    return {"WTI原油": value}
+    # 备源：akshare
+    df = ak.macro_energy_oil_hist(symbol="WTI")
+    if df is None or df.empty:
+        raise ValueError("WTI原油数据为空")
+    df.columns = [str(c).strip() for c in df.columns]
+    price_col = None
+    for c in df.columns:
+        if "收盘" in c or "close" in c.lower() or "价格" in c or "price" in c.lower():
+            price_col = c
+            break
+    if price_col is None:
+        price_col = df.columns[-1]
+    df[price_col] = pd.to_numeric(df[price_col], errors="coerce")
+    df = df.dropna(subset=[price_col])
+    if df.empty:
+        raise ValueError("WTI原油有效数据为空")
+    return {"WTI原油": safe_float(df.iloc[-1][price_col])}
 
 
 def fetch_vix():
