@@ -215,10 +215,14 @@ def get_tenant_access_token():
 # 数据抓取：官方/FRED
 # =========================
 def fetch_fed_rate_target():
-    # FOMC 一年只开8次会，每次开完手动更新这一行
-    # 最近一次：2026-03-18，维持 3.50-3.75
-    # 下次会议：2026-05-06
-    return {"美联储基准利率": "3.50-3.75"}
+    # 通过 Cloudflare Worker 中转访问 FRED（绕开 GitHub Actions IP 封锁）
+    worker_url = os.environ["CLOUDFLARE_WORKER_URL"].rstrip("/") + "/fed-rate"
+    resp = requests.get(worker_url, timeout=TIMEOUT)
+    resp.raise_for_status()
+    data = resp.json()
+    if not data.get("ok"):
+        raise ValueError(f"Worker 返回错误: {data}")
+    return {"美联储基准利率": data["rate"]}
 
 
 def fetch_us2y_fred():

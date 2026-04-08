@@ -36,6 +36,21 @@ export default {
         return jsonResponse(result, result.ok ? 200 : 500);
       }
 
+      if (url.pathname === "/fed-rate") {
+        if (!env.FRED_API_KEY) {
+          return jsonResponse({ ok: false, error: "FRED_API_KEY not configured" }, 500);
+        }
+        const [lowerRes, upperRes] = await Promise.all([
+          fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=DFEDTARL&api_key=${env.FRED_API_KEY}&sort_order=desc&limit=1&file_type=json`),
+          fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=DFEDTARU&api_key=${env.FRED_API_KEY}&sort_order=desc&limit=1&file_type=json`),
+        ]);
+        const lower = await lowerRes.json();
+        const upper = await upperRes.json();
+        const lv = lower.observations[0].value;
+        const uv = upper.observations[0].value;
+        return jsonResponse({ ok: true, rate: `${lv}-${uv}` });
+      }
+
       return jsonResponse({
         ok: true,
         message: "Use POST /run to test the dispatcher or GET /health for status.",
