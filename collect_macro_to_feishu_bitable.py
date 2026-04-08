@@ -217,7 +217,6 @@ def get_tenant_access_token():
 def fetch_fed_rate_target():
     worker_url = os.environ["CLOUDFLARE_WORKER_URL"].rstrip("/") + "/fed-rate"
     resp = requests.get(worker_url, timeout=TIMEOUT)
-    log(f"Worker 响应: {resp.status_code} {resp.text[:200]}")
     resp.raise_for_status()
     data = resp.json()
     if not data.get("ok"):
