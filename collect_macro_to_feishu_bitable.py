@@ -300,10 +300,38 @@ def fetch_copper():
 
 
 def fetch_usdcnh():
-    value, _ = fetch_yfinance_last_close("USDCNH=X")
-    if value is None or not (5 < value < 10):
-        raise ValueError(f"USD/CNH 数据异常: {value}")
-    return {"USD/CNH": value}
+    # 依次尝试多个 yfinance ticker
+    for sym in ("USDCNH=X", "CNH=X", "CNHUSD=X"):
+        try:
+            value, _ = fetch_yfinance_last_close(sym)
+            if value is not None and (5 < value < 10):
+                return {"USD/CNH": value}
+        except Exception:
+            continue
+
+    # yfinance 全部失败 → akshare 外汇即期报价
+    try:
+        df = ak.currency_latest(symbol="USDCNH")
+        if df is not None and not df.empty:
+            value = safe_float(df.iloc[-1]["price"])
+            if value is not None and (5 < value < 10):
+                return {"USD/CNH": value}
+    except Exception:
+        pass
+
+    # akshare 也失败 → 用 requests 直接查 ExchangeRate-API（免费无需 key）
+    try:
+        resp = requests.get(
+            "https://open.er-api.com/v6/latest/USD", timeout=10
+        )
+        data = resp.json()
+        value = safe_float(data.get("rates", {}).get("CNH") or data.get("rates", {}).get("CNY"))
+        if value is not None and (5 < value < 10):
+            return {"USD/CNH": value}
+    except Exception:
+        pass
+
+    raise ValueError("USD/CNH 所有数据源均失败")
 
 
 # =========================
